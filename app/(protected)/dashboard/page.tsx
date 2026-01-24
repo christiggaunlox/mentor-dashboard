@@ -62,7 +62,7 @@ const scheduledClasses = [
     }
 ];
 
-export default function MentorDashboard() {
+export default function Dashboard() {
     const [date, setDate] = useState<Date | undefined>(new Date());
 
     // Filter classes based on the selected date
