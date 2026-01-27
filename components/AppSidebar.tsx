@@ -3,7 +3,9 @@
 import {
   CreditCard,
   LayoutDashboard,
+  BookOpen,
   Logs,
+  School,
   ShieldAlert,
   Truck,
   Users,
@@ -36,6 +38,16 @@ const items = [
     title: "Dashboard",
     url: "/dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Curriculums",
+    url: "/addcurriculums",
+    icon: BookOpen,
+  },
+  {
+    title: "Schedule Classes",
+    url: "/scheduleclass",
+    icon: School,
   },
 ];
 
