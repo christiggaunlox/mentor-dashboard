@@ -29,8 +29,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
             localStorage.setItem('mentorRefreshToken', refreshToken);
             set({ user: mentor, isLoading: false });
         } catch (error: any) {
-            console.error('Login error:', error.response?.data || error.message);
-            throw error;
+            const errorMessage = error?.response?.data?.message || error?.message || 'Login failed. Please try again.';
+            // Create a new error with the message for proper error handling
+            const customError = new Error(errorMessage);
+            throw customError;
         }
     },
 
@@ -60,29 +62,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
                     isLoading: false,
                 });
             } catch (profileError: any) {
-                // Log detailed error info
-                console.error('Profile fetch error details:', {
-                    status: profileError.response?.status,
-                    data: profileError.response?.data,
-                    message: profileError.message,
-                });
-
-                // If we get a 404, the mentor might not exist in DB
-                // But we still have a valid token, so don't fully logout
+                // If we get a 404, the mentor doesn't exist or token is invalid
                 if (profileError.response?.status === 404) {
-                    console.warn('⚠️ Mentor profile not found (404). Token may be invalid or mentor deleted.');
-                    // Try to refresh token instead of immediately logging out
-                    try {
-                        const refreshToken = localStorage.getItem('mentorRefreshToken');
-                        if (refreshToken) {
-                            console.log('Attempting to refresh token...');
-                            // Token might be expired, try refresh
-                            return; // Will keep trying on next load
-                        }
-                    } catch (refreshErr) {
-                        console.error('Token refresh failed:', refreshErr);
-                    }
-                    // If refresh fails or no refresh token, logout
+                    console.warn('⚠️ Mentor profile not found (404). Clearing authentication.');
                     localStorage.removeItem('mentorAccessToken');
                     localStorage.removeItem('mentorRefreshToken');
                     set({ user: null, isLoading: false });
@@ -93,8 +75,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
                     localStorage.removeItem('mentorRefreshToken');
                     set({ user: null, isLoading: false });
                 } else {
-                    // Network or other errors
-                    console.error('Unexpected error during profile fetch');
+                    // Network or other errors - just logout silently
                     localStorage.removeItem('mentorAccessToken');
                     localStorage.removeItem('mentorRefreshToken');
                     set({ user: null, isLoading: false });

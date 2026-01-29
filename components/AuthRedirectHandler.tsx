@@ -9,7 +9,7 @@ export function AuthRedirectHandler() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const publicPages = ['/login', '/forgot-password', '/reset-password', '/'];
+  const publicPages = ['/login', '/forgot-password', '/otp', '/reset-password', '/'];
 
   useEffect(() => {
     if (isLoading || !pathname) return;

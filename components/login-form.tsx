@@ -46,8 +46,7 @@ export function LoginForm({
       console.log('Login successful, redirecting to dashboard');
       router.push('/dashboard');
     } catch (err: any) {
-      const errorMessage = err.response?.data?.message || err.message || 'Login failed. Please try again.';
-      console.error('Login error:', errorMessage);
+      const errorMessage = err?.message || err?.response?.data?.message || 'Login failed. Please try again.';
       setError(errorMessage);
     }
   };
