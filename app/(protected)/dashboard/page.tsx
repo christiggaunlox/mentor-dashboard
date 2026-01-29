@@ -1,213 +1,260 @@
 "use client"
 
-import React, { useState } from "react";
-import { format, isSameDay } from "date-fns";
+import React, { useState, useEffect, useMemo } from "react";
+import { format, addHours, isSameDay, parseISO } from "date-fns";
 import {
     Calendar as CalendarIcon,
-    Clock,
     Video,
     MoreVertical,
+    Clock,
+    User,
+    Loader2,
+    RefreshCcw,
+    X
 } from "lucide-react";
+import { toast } from "react-toastify";
 
-// Shadcn UI Components (Adjust import paths based on your project structure)
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 
-// --- Mock Data ---
-const scheduledClasses = [
-    {
-        id: 1,
-        topic: "Advanced React Patterns",
-        student: "Alice Johnson",
-        image: "https://i.pravatar.cc/150?u=alice",
-        time: "10:00 AM - 11:00 AM",
-        date: new Date(), // Today
-        status: "Upcoming",
-        type: "1:1 Session"
-    },
-    {
-        id: 2,
-        topic: "System Design Basics",
-        student: "Mark Smith",
-        image: "https://i.pravatar.cc/150?u=mark",
-        time: "02:00 PM - 03:00 PM",
-        date: new Date(), // Today
-        status: "Pending",
-        type: "Group Call"
-    },
-    {
-        id: 3,
-        topic: "Career Guidance",
-        student: "Sarah Lee",
-        image: "https://i.pravatar.cc/150?u=sarah",
-        time: "04:30 PM - 05:00 PM",
-        date: new Date(), // Today
-        status: "Confirmed",
-        type: "1:1 Session"
-    },
-    {
-        id: 4,
-        topic: "Intro to TypeScript",
-        student: "David Kim",
-        image: "https://i.pravatar.cc/150?u=david",
-        time: "09:00 AM - 10:30 AM",
-        date: new Date(new Date().setDate(new Date().getDate() + 1)), // Tomorrow
-        status: "Upcoming",
-        type: "Workshop"
-    }
-];
+// --- Types ---
+interface BackendScheduleItem {
+    _id: string;
+    topic: string;
+    schedule: string;
+    classStatus: boolean;
+    scheduleStatus: "requested" | "approved" | "rejected";
+    mentorBatches: { _id: string; name: string }[];
+    mentorCourses: { _id: string; course_name: string }[];
+    meetingLink?: string;
+}
 
 export default function Dashboard() {
-    const [date, setDate] = useState<Date | undefined>(new Date());
+    // Initialize date as undefined so we show ALL classes by default
+    const [date, setDate] = useState<Date | undefined>(undefined);
+    const [allSchedules, setAllSchedules] = useState<BackendScheduleItem[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
 
-    // Filter classes based on the selected date
-    const selectedDateClasses = scheduledClasses.filter((session) =>
-        date && isSameDay(session.date, date)
-    );
+    const fetchSchedules = async () => {
+        setIsLoading(true);
+        try {
+            const token = localStorage.getItem("mentorAccessToken");
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/class/mentorupcoming`, {
+                method: "GET",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                }
+            });
+
+            if (!res.ok) {
+                if (res.status === 401) throw new Error("Unauthorized");
+                throw new Error("Failed to fetch classes");
+            }
+
+            const data = await res.json();
+            setAllSchedules(data);
+        } catch (error) {
+            console.error(error);
+            toast.error("Failed to load schedule");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchSchedules();
+    }, []);
+
+    const displayedClasses = useMemo(() => {
+        let dataToDisplay = allSchedules;
+
+        // If a date is selected, filter by that date
+        if (date) {
+            dataToDisplay = allSchedules.filter((item) => {
+                if (!item.schedule) return false;
+                return isSameDay(parseISO(item.schedule), date);
+            });
+        }
+
+        // Always sort by time (Earliest first)
+        return [...dataToDisplay].sort((a, b) =>
+            new Date(a.schedule).getTime() - new Date(b.schedule).getTime()
+        );
+
+    }, [date, allSchedules]);
+
+    // --- Helpers ---
+    const getTargetName = (session: BackendScheduleItem) => {
+        if (session.mentorBatches?.length > 0) return session.mentorBatches[0].name;
+        if (session.mentorCourses?.length > 0) return session.mentorCourses[0].course_name;
+        return "1:1 Session";
+    };
+
+    const getCourseNames = (session: BackendScheduleItem) => {
+        if (!session.mentorCourses?.length) return null;
+        return session.mentorCourses.map(c => c.course_name).join(", ");
+    };
+
 
     return (
         <div className="min-h-screen bg-slate-50/50 p-6 md:p-10">
-
-            {/* Header Section */}
+            {/* Header */}
             <div className="mb-8 flex items-center justify-between">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight text-slate-900">Dashboard</h1>
-                    <p className="text-slate-500">Welcome back! Here is your mentorship schedule.</p>
-                </div>
-                <div className="hidden md:flex gap-2">
-                    <Button variant="outline">Sync Calendar</Button>
-                    <Button>+ New Session</Button>
+                    <p className="text-slate-500">Manage your mentorship schedule.</p>
                 </div>
             </div>
 
-            {/* Main Layout Grid */}
-            <div className="grid gap-6 md:grid-cols-12 lg:grid-cols-12 h-full">
+            {/* Main Grid */}
+            <div className="grid gap-6 md:grid-cols-12 h-full items-start">
 
-                {/* LEFT COLUMN: Calendar & Quick Stats */}
-                <div className="md:col-span-4 lg:col-span-3 space-y-6">
-                    <Card className="shadow-sm">
+                {/* --- LEFT: Calendar --- */}
+                <div className="md:col-span-12 lg:col-span-4 space-y-6">
+                    <Card className="shadow-sm border-slate-200 sticky top-6">
                         <CardHeader>
                             <CardTitle className="text-lg">Calendar</CardTitle>
+                            <CardDescription>
+                                {date ? "Filter applied by date" : "Showing all upcoming classes"}
+                            </CardDescription>
                         </CardHeader>
-                        <CardContent className="flex justify-center p-0 pb-4">
+                        <CardContent className="flex justify-center p-4">
                             <Calendar
                                 mode="single"
                                 selected={date}
                                 onSelect={setDate}
-                                className="rounded-md border shadow-sm"
+                                className="rounded-md border shadow-sm w-full flex justify-center"
+                                modifiers={{
+                                    hasEvent: (day) =>
+                                        allSchedules.some(s =>
+                                            isSameDay(parseISO(s.schedule), day)
+                                        ),
+                                }}
+                                modifiersClassNames={{
+                                    hasEvent:
+                                        "relative after:content-[''] after:absolute after:top-1 after:right-1 after:w-1.5 after:h-1.5 after:bg-blue-500 after:rounded-full"
+                                }}
                             />
-                        </CardContent>
-                    </Card>
 
-                    {/* Mini Stat Card (Optional but nice) */}
-                    <Card className="bg-slate-900 text-white shadow-lg">
-                        <CardContent className="p-6">
-                            <div className="flex items-center gap-4">
-                                <div className="p-3 bg-slate-800 rounded-full">
-                                    <Clock className="h-6 w-6 text-blue-400" />
-                                </div>
-                                <div>
-                                    <p className="text-sm text-slate-400">Total Hours Today</p>
-                                    <p className="text-2xl font-bold">4.5 Hrs</p>
-                                </div>
-                            </div>
                         </CardContent>
                     </Card>
                 </div>
 
-                {/* RIGHT COLUMN: Scheduled Classes List */}
-                <div className="md:col-span-8 lg:col-span-9">
+                {/* --- RIGHT: Class List --- */}
+                <div className="md:col-span-12 lg:col-span-8">
                     <Card className="h-full border-none shadow-none bg-transparent">
                         <CardHeader className="px-0 pt-0">
                             <div className="flex items-center justify-between">
-                                <CardTitle className="text-xl">
+                                <CardTitle className="text-xl flex items-center gap-2">
                                     {date ? (
-                                        <span>Schedule for {format(date, "MMMM do, yyyy")}</span>
+                                        <>Schedule for <span className="text-blue-600">{format(date, "MMMM do")}</span></>
                                     ) : (
-                                        <span>Select a date</span>
+                                        <span>All Upcoming Sessions</span>
                                     )}
                                 </CardTitle>
                                 <Badge variant="secondary" className="px-3 py-1">
-                                    {selectedDateClasses.length} Sessions
+                                    {displayedClasses.length} Sessions
                                 </Badge>
                             </div>
-                            <CardDescription>
-                                Manage your upcoming classes and student meetings.
-                            </CardDescription>
                         </CardHeader>
 
                         <CardContent className="px-0">
-                            <ScrollArea className="h-[600px] pr-4">
-                                {selectedDateClasses.length > 0 ? (
+                            <ScrollArea className="h-[650px] pr-4">
+                                {isLoading && allSchedules.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                                        <Loader2 className="h-8 w-8 animate-spin mb-2" />
+                                        <p>Fetching schedule...</p>
+                                    </div>
+                                ) : displayedClasses.length > 0 ? (
                                     <div className="space-y-4">
-                                        {selectedDateClasses.map((session) => (
-                                            <Card key={session.id} className="hover:shadow-md transition-shadow duration-200 border-l-4 border-l-blue-500">
-                                                <div className="p-6 flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
+                                        {displayedClasses.map((session) => {
+                                            const startTime = new Date(session.schedule);
+                                            const endTime = addHours(startTime, 1);
 
-                                                    {/* Time Column */}
-                                                    <div className="flex flex-row sm:flex-col items-center sm:items-start gap-2 min-w-[120px]">
-                                                        <span className="text-lg font-bold text-slate-700">
-                                                            {session.time.split('-')[0]}
-                                                        </span>
-                                                        <span className="text-sm text-slate-400">
-                                                            {session.time.split('-')[1]}
-                                                        </span>
-                                                    </div>
+                                            return (
+                                                <Card key={session._id} className="hover:shadow-md transition-shadow duration-200 border-l-4 border-l-blue-500">
+                                                    <div className="p-6 flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
 
-                                                    {/* Details Column */}
-                                                    <div className="flex-1 space-y-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <h3 className="font-semibold text-lg">{session.topic}</h3>
-                                                            <Badge variant={session.status === 'Confirmed' ? 'default' : 'secondary'} className="text-[10px]">
-                                                                {session.status}
-                                                            </Badge>
+                                                        {/* Details */}
+                                                        <div className="flex-1 space-y-1">
+                                                            <div className="flex items-center gap-3 mb-2">
+                                                                {/* Show Date in list if showing ALL sessions */}
+                                                                {!date && (
+                                                                    <div className="flex items-center gap-1.5 text-slate-700 bg-slate-200 px-2 py-1 rounded text-sm font-bold">
+                                                                        <CalendarIcon className="h-3.5 w-3.5" />
+                                                                        {format(startTime, "MMM dd")}
+                                                                    </div>
+                                                                )}
+                                                                {session.classStatus ? (
+                                                                    <Badge className="bg-green-100 text-green-800 border-green-200 hover:bg-green-100">Completed</Badge>
+                                                                ) : (
+                                                                    <Badge variant="outline" className="border-blue-200 text-blue-700 bg-blue-50">Upcoming</Badge>
+                                                                )}
+                                                            </div>
+
+                                                            <h3 className="font-semibold text-lg text-slate-900">
+                                                                {session.topic}
+                                                            </h3>
+
+                                                            {/* Course Name(s) */}
+                                                            {session.mentorCourses?.length > 0 && (
+                                                                <p className="text-sm text-slate-600 mt-1">
+                                                                    <span className="font-medium text-slate-700">Course:</span>{" "}
+                                                                    {getCourseNames(session)}
+                                                                </p>
+                                                            )}
+
+                                                            {/* Starts at */}
+                                                            <p className="text-sm text-slate-500 flex items-center gap-1 mt-1">
+                                                                <Clock className="h-3.5 w-3.5" />
+                                                                <span>
+                                                                    Starts at{" "}
+                                                                    <span className="font-medium text-slate-700">
+                                                                        {format(startTime, "h:mm a")}
+                                                                    </span>
+                                                                </span>
+                                                            </p>
+
+
+                                                            <div className="flex items-center gap-4 text-sm text-slate-500 mt-3">
+                                                                <div className="flex items-center gap-2">
+                                                                    <Avatar className="h-6 w-6">
+                                                                        <AvatarFallback className="bg-orange-100 text-orange-600 text-xs">
+                                                                            <User className="h-3 w-3" />
+                                                                        </AvatarFallback>
+                                                                    </Avatar>
+                                                                    <span>{getTargetName(session)}</span>
+                                                                </div>
+                                                                <Separator orientation="vertical" className="h-4" />
+                                                            </div>
                                                         </div>
 
-                                                        <div className="flex items-center gap-4 text-sm text-slate-500 mt-2">
-                                                            <div className="flex items-center gap-2">
-                                                                <Avatar className="h-6 w-6">
-                                                                    <AvatarImage src={session.image} />
-                                                                    <AvatarFallback>ST</AvatarFallback>
-                                                                </Avatar>
-                                                                <span>{session.student}</span>
-                                                            </div>
-                                                            <Separator orientation="vertical" className="h-4" />
-                                                            <div className="flex items-center gap-1">
-                                                                <Video className="h-3 w-3" />
-                                                                <span>{session.type}</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
 
-                                                    {/* Actions Column */}
-                                                    <div className="flex items-center gap-2 w-full sm:w-auto mt-4 sm:mt-0">
-                                                        <Button className="w-full sm:w-auto" size="sm">
-                                                            Start Class
-                                                        </Button>
-                                                        <Button variant="ghost" size="icon">
-                                                            <MoreVertical className="h-4 w-4" />
-                                                        </Button>
                                                     </div>
-                                                </div>
-                                            </Card>
-                                        ))}
+                                                </Card>
+                                            );
+                                        })}
                                     </div>
                                 ) : (
-                                    // Empty State
-                                    <div className="flex flex-col items-center justify-center h-[400px] border-2 border-dashed rounded-lg bg-slate-50">
+                                    <div className="flex flex-col items-center justify-center h-[400px] border-2 border-dashed rounded-lg bg-slate-50/50">
                                         <div className="p-4 bg-slate-100 rounded-full mb-4">
                                             <CalendarIcon className="h-8 w-8 text-slate-400" />
                                         </div>
-                                        <h3 className="text-lg font-semibold text-slate-900">No classes scheduled</h3>
+                                        <h3 className="text-lg font-semibold text-slate-900">No classes found</h3>
                                         <p className="text-slate-500 max-w-sm text-center mb-6">
-                                            You are free for the day! Enjoy your time off or schedule a new session.
+                                            {date ? "No sessions scheduled for this specific date." : "You have no upcoming classes."}
                                         </p>
-                                        <Button variant="outline">Schedule Session</Button>
+                                        {date && (
+                                            <Button variant="outline" onClick={() => setDate(undefined)}>
+                                                View All Sessions
+                                            </Button>
+                                        )}
                                     </div>
                                 )}
                             </ScrollArea>

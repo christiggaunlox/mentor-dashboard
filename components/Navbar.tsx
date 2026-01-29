@@ -38,7 +38,7 @@ const Navbar = () => {
     >
       <SidebarTrigger />
       <div className="flex items-center gap-4">
-        <DropdownMenu>
+        {/* <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="icon">
               <Sun className="h-[1.2rem] w-[1.2rem] scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90" />
@@ -46,7 +46,7 @@ const Navbar = () => {
               <span className="sr-only">Toggle theme</span>
             </Button>
           </DropdownMenuTrigger>
-        </DropdownMenu>
+        </DropdownMenu> */}
         <DropdownMenu>
           <DropdownMenuTrigger>
             <Avatar>
@@ -61,10 +61,10 @@ const Navbar = () => {
               <User className="h-[1.2rem] w-[1.2rem] mr-2" />
               Profile
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            {/* <DropdownMenuItem>
               <Settings className="h-[1.2rem] w-[1.2rem] mr-2" />
               Settings
-            </DropdownMenuItem>
+            </DropdownMenuItem> */}
             <DropdownMenuItem variant="destructive" onClick={handleLogout}>
               <LogOut className="h-[1.2rem] w-[1.2rem] mr-2" />
               Logout
