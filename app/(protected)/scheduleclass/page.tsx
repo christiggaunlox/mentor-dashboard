@@ -129,10 +129,10 @@ const ScheduleClasses = () => {
                     Authorization: `Bearer ${token}`
                 },
                 body: JSON.stringify({
-                    courseIds: selectedCourseIds,        // ✅
-                    batchIds: selectedBatchIds,           // ✅
-                    topic: selectedTopic.name,            // ✅ topic NAME
-                    schedule: finalSchedule,              // ✅ datetime
+                    courseIds: selectedCourseIds,
+                    batchIds: selectedBatchIds,
+                    topic: selectedTopic.name,
+                    schedule: finalSchedule,
                 }),
             });
 

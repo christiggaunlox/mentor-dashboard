@@ -1,17 +1,25 @@
 "use client"
 
+import { cn } from "@/lib/utils";
 import React, { useState, useEffect, useMemo } from "react";
-import { format, addHours, isSameDay, parseISO } from "date-fns";
+import { format, isSameDay, parseISO, startOfToday, isPast } from "date-fns"; // Added isPast
+
 import {
     Calendar as CalendarIcon,
-    Video,
-    MoreVertical,
     Clock,
     User,
     Loader2,
-    RefreshCcw,
-    X
+    CalendarDays,
+    XCircle,
+    AlertTriangle,
+    AlertCircle // Added AlertCircle
 } from "lucide-react";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover";
+
 import { toast } from "react-toastify";
 
 import { Calendar } from "@/components/ui/calendar";
@@ -20,7 +28,16 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { useAuthStore } from "@/lib/authStore";
 
 // --- Types ---
 interface BackendScheduleItem {
@@ -35,11 +52,24 @@ interface BackendScheduleItem {
 }
 
 export default function Dashboard() {
-    // Initialize date as undefined so we show ALL classes by default
+    // --- State ---
     const [date, setDate] = useState<Date | undefined>(undefined);
     const [allSchedules, setAllSchedules] = useState<BackendScheduleItem[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isActionLoading, setIsActionLoading] = useState(false);
 
+    // Dialog States
+    const [selectedClass, setSelectedClass] = useState<BackendScheduleItem | null>(null);
+    const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
+    const [isCancelOpen, setIsCancelOpen] = useState(false);
+
+    // Reschedule Form State
+    const [selectedRescheduleDate, setSelectedRescheduleDate] = useState<Date | undefined>(undefined);
+    const [selectedRescheduleTime, setSelectedRescheduleTime] = useState("10:00");
+
+    const { user } = useAuthStore();
+
+    // --- Fetching ---
     const fetchSchedules = async () => {
         setIsLoading(true);
         try {
@@ -52,10 +82,7 @@ export default function Dashboard() {
                 }
             });
 
-            if (!res.ok) {
-                if (res.status === 401) throw new Error("Unauthorized");
-                throw new Error("Failed to fetch classes");
-            }
+            if (!res.ok) throw new Error("Failed to fetch classes");
 
             const data = await res.json();
             setAllSchedules(data);
@@ -71,10 +98,101 @@ export default function Dashboard() {
         fetchSchedules();
     }, []);
 
+    // --- Actions ---
+
+    const handleRescheduleSubmit = async () => {
+        if (!selectedClass || !selectedRescheduleDate || !selectedRescheduleTime) return;
+
+        setIsActionLoading(true);
+
+        try {
+            const [hours, minutes] = selectedRescheduleTime.split(":");
+
+            const finalDate = new Date(selectedRescheduleDate);
+            finalDate.setHours(Number(hours));
+            finalDate.setMinutes(Number(minutes));
+            finalDate.setSeconds(0);
+
+            const token = localStorage.getItem("mentorAccessToken");
+
+            const res = await fetch(
+                `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/class/reschedule`,
+                {
+                    method: "PATCH",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        classId: selectedClass._id,
+                        newSchedule: finalDate.toISOString(),
+                    }),
+                }
+            );
+
+            if (!res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.message || "Failed to reschedule class");
+            }
+
+            toast.success("Class rescheduled successfully!");
+            setIsRescheduleOpen(false);
+            fetchSchedules();
+        } catch (error: any) {
+            console.error(error);
+            toast.error(error.message || "Error rescheduling class");
+        } finally {
+            setIsActionLoading(false);
+        }
+    };
+
+
+    const handleCancelSubmit = async () => {
+        if (!selectedClass) return;
+
+        setIsActionLoading(true);
+        try {
+            const token = localStorage.getItem("mentorAccessToken");
+            const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/api/class/${selectedClass._id}/cancel`, {
+                method: "DELETE",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                }
+            });
+
+            if (!res.ok) throw new Error("Failed to cancel class");
+
+            toast.success("Class cancelled successfully");
+            setIsCancelOpen(false);
+            fetchSchedules();
+        } catch (error) {
+            console.error(error);
+            toast.error("Error cancelling class");
+        } finally {
+            setIsActionLoading(false);
+        }
+    };
+
+    const openRescheduleDialog = (session: BackendScheduleItem) => {
+        setSelectedClass(session);
+        const current = new Date(session.schedule);
+        setSelectedRescheduleDate(current);
+        const hours = String(current.getHours()).padStart(2, "0");
+        const minutes = String(current.getMinutes()).padStart(2, "0");
+        setSelectedRescheduleTime(`${hours}:${minutes}`);
+        setIsRescheduleOpen(true);
+    };
+
+    const openCancelDialog = (session: BackendScheduleItem) => {
+        setSelectedClass(session);
+        setIsCancelOpen(true);
+    };
+
+    // --- Memoization ---
     const displayedClasses = useMemo(() => {
         let dataToDisplay = allSchedules;
 
-        // If a date is selected, filter by that date
         if (date) {
             dataToDisplay = allSchedules.filter((item) => {
                 if (!item.schedule) return false;
@@ -82,7 +200,6 @@ export default function Dashboard() {
             });
         }
 
-        // Always sort by time (Earliest first)
         return [...dataToDisplay].sort((a, b) =>
             new Date(a.schedule).getTime() - new Date(b.schedule).getTime()
         );
@@ -101,20 +218,22 @@ export default function Dashboard() {
         return session.mentorCourses.map(c => c.course_name).join(", ");
     };
 
-
     return (
         <div className="min-h-screen bg-slate-50/50 p-6 md:p-10">
             {/* Header */}
             <div className="mb-8 flex items-center justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight text-slate-900">Dashboard</h1>
-                    <p className="text-slate-500">Manage your mentorship schedule.</p>
+                    <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+                        👋 Hi{user?.name ? `, ${user.name}` : ""}
+                    </h1>
+                    <p className="text-slate-500">
+                        Manage your mentorship schedule.
+                    </p>
                 </div>
             </div>
 
             {/* Main Grid */}
             <div className="grid gap-6 md:grid-cols-12 h-full items-start">
-
                 {/* --- LEFT: Calendar --- */}
                 <div className="md:col-span-12 lg:col-span-4 space-y-6">
                     <Card className="shadow-sm border-slate-200 sticky top-6">
@@ -141,7 +260,6 @@ export default function Dashboard() {
                                         "relative after:content-[''] after:absolute after:top-1 after:right-1 after:w-1.5 after:h-1.5 after:bg-blue-500 after:rounded-full"
                                 }}
                             />
-
                         </CardContent>
                     </Card>
                 </div>
@@ -175,67 +293,108 @@ export default function Dashboard() {
                                     <div className="space-y-4">
                                         {displayedClasses.map((session) => {
                                             const startTime = new Date(session.schedule);
-                                            const endTime = addHours(startTime, 1);
+                                            // Check if expired (Past date AND not completed)
+                                            const isExpired = isPast(startTime) && !session.classStatus;
 
                                             return (
-                                                <Card key={session._id} className="hover:shadow-md transition-shadow duration-200 border-l-4 border-l-blue-500">
-                                                    <div className="p-6 flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
+                                                <Card
+                                                    key={session._id}
+                                                    className={cn(
+                                                        "hover:shadow-md transition-shadow duration-200 border-l-4",
+                                                        // Dynamic Border Logic
+                                                        session.classStatus
+                                                            ? "border-l-green-500 opacity-60 bg-slate-50"
+                                                            : isExpired
+                                                                ? "border-l-red-500 bg-red-50/10"
+                                                                : "border-l-blue-500"
+                                                    )}
+                                                >
+                                                    <div className="p-6">
+                                                        <div className="flex flex-col sm:flex-row gap-6 items-end justify-between">
 
-                                                        {/* Details */}
-                                                        <div className="flex-1 space-y-1">
-                                                            <div className="flex items-center gap-3 mb-2">
-                                                                {/* Show Date in list if showing ALL sessions */}
-                                                                {!date && (
-                                                                    <div className="flex items-center gap-1.5 text-slate-700 bg-slate-200 px-2 py-1 rounded text-sm font-bold">
-                                                                        <CalendarIcon className="h-3.5 w-3.5" />
-                                                                        {format(startTime, "MMM dd")}
+                                                            {/* Details Section */}
+                                                            <div className="flex-1 space-y-1">
+                                                                <div className="flex items-center gap-3 mb-2">
+                                                                    {!date && (
+                                                                        <div className="flex items-center gap-1.5 text-slate-700 bg-slate-200 px-2 py-1 rounded text-sm font-bold">
+                                                                            <CalendarIcon className="h-3.5 w-3.5" />
+                                                                            {format(startTime, "MMM dd")}
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* Status Badges */}
+                                                                    {session.classStatus ? (
+                                                                        <Badge className="bg-green-100 text-green-800 border-green-200 hover:bg-green-100">
+                                                                            Completed
+                                                                        </Badge>
+                                                                    ) : isExpired ? (
+                                                                        <Badge variant="destructive" className="bg-red-100 text-red-700 hover:bg-red-100 border-red-200 border shadow-none">
+                                                                            <AlertCircle className="w-3 h-3 mr-1" /> Overdue
+                                                                        </Badge>
+                                                                    ) : (
+                                                                        <Badge variant="outline" className="border-blue-200 text-blue-700 bg-blue-50">
+                                                                            Upcoming
+                                                                        </Badge>
+                                                                    )}
+                                                                </div>
+
+                                                                <h3 className="font-semibold text-lg text-slate-900">
+                                                                    {session.topic}
+                                                                </h3>
+
+                                                                {session.mentorCourses?.length > 0 && (
+                                                                    <p className="text-sm text-slate-600 mt-1">
+                                                                        <span className="font-medium text-slate-700">Course:</span>{" "}
+                                                                        {getCourseNames(session)}
+                                                                    </p>
+                                                                )}
+
+                                                                <p className="text-sm text-slate-500 flex items-center gap-1 mt-1">
+                                                                    <Clock className="h-3.5 w-3.5" />
+                                                                    <span>
+                                                                        Starts at{" "}
+                                                                        <span className="font-medium text-slate-700">
+                                                                            {format(startTime, "h:mm a")}
+                                                                        </span>
+                                                                    </span>
+                                                                </p>
+
+                                                                <div className="flex items-center gap-4 text-sm text-slate-500 mt-3">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <Avatar className="h-6 w-6">
+                                                                            <AvatarFallback className="bg-orange-100 text-orange-600 text-xs">
+                                                                                <User className="h-3 w-3" />
+                                                                            </AvatarFallback>
+                                                                        </Avatar>
+                                                                        <span>{getTargetName(session)}</span>
                                                                     </div>
-                                                                )}
-                                                                {session.classStatus ? (
-                                                                    <Badge className="bg-green-100 text-green-800 border-green-200 hover:bg-green-100">Completed</Badge>
-                                                                ) : (
-                                                                    <Badge variant="outline" className="border-blue-200 text-blue-700 bg-blue-50">Upcoming</Badge>
-                                                                )}
+                                                                </div>
                                                             </div>
 
-                                                            <h3 className="font-semibold text-lg text-slate-900">
-                                                                {session.topic}
-                                                            </h3>
-
-                                                            {/* Course Name(s) */}
-                                                            {session.mentorCourses?.length > 0 && (
-                                                                <p className="text-sm text-slate-600 mt-1">
-                                                                    <span className="font-medium text-slate-700">Course:</span>{" "}
-                                                                    {getCourseNames(session)}
-                                                                </p>
-                                                            )}
-
-                                                            {/* Starts at */}
-                                                            <p className="text-sm text-slate-500 flex items-center gap-1 mt-1">
-                                                                <Clock className="h-3.5 w-3.5" />
-                                                                <span>
-                                                                    Starts at{" "}
-                                                                    <span className="font-medium text-slate-700">
-                                                                        {format(startTime, "h:mm a")}
-                                                                    </span>
-                                                                </span>
-                                                            </p>
-
-
-                                                            <div className="flex items-center gap-4 text-sm text-slate-500 mt-3">
-                                                                <div className="flex items-center gap-2">
-                                                                    <Avatar className="h-6 w-6">
-                                                                        <AvatarFallback className="bg-orange-100 text-orange-600 text-xs">
-                                                                            <User className="h-3 w-3" />
-                                                                        </AvatarFallback>
-                                                                    </Avatar>
-                                                                    <span>{getTargetName(session)}</span>
-                                                                </div>
-                                                                <Separator orientation="vertical" className="h-4" />
+                                                            {/* Actions Buttons */}
+                                                            <div className="flex flex-row gap-2 w-full sm:w-auto mt-4 sm:mt-0 justify-end">
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    className="gap-2 text-slate-600"
+                                                                    onClick={() => openRescheduleDialog(session)}
+                                                                    disabled={session.classStatus}
+                                                                >
+                                                                    <CalendarDays className="h-4 w-4" />
+                                                                    Reschedule
+                                                                </Button>
+                                                                <Button
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                                                                    onClick={() => openCancelDialog(session)}
+                                                                    disabled={session.classStatus}
+                                                                >
+                                                                    <XCircle className="h-4 w-4" />
+                                                                    Cancel
+                                                                </Button>
                                                             </div>
                                                         </div>
-
-
                                                     </div>
                                                 </Card>
                                             );
@@ -262,6 +421,104 @@ export default function Dashboard() {
                     </Card>
                 </div>
             </div>
+
+            {/* --- Dialogs --- */}
+
+            {/* Reschedule Dialog */}
+            <Dialog open={isRescheduleOpen} onOpenChange={setIsRescheduleOpen}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <DialogTitle>Reschedule Class</DialogTitle>
+                        <DialogDescription>
+                            Choose a new date and time for <strong>{selectedClass?.topic}</strong>.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="grid gap-4 py-4">
+                        {/* Date Picker */}
+                        <div className="grid gap-2">
+                            <Label>New Date</Label>
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        className={cn(
+                                            "justify-start text-left font-normal",
+                                            !selectedRescheduleDate && "text-muted-foreground"
+                                        )}
+                                    >
+                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                        {selectedRescheduleDate ? format(selectedRescheduleDate, "PPP") : "Pick a date"}
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="start">
+                                    <Calendar
+                                        mode="single"
+                                        selected={selectedRescheduleDate}
+                                        onSelect={setSelectedRescheduleDate}
+                                        disabled={(date) => date < startOfToday()}
+                                        initialFocus
+                                    />
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+
+                        {/* Time Picker */}
+                        <div className="grid gap-2">
+                            <Label>New Time</Label>
+                            <input
+                                type="time"
+                                value={selectedRescheduleTime}
+                                onChange={(e) => setSelectedRescheduleTime(e.target.value)}
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsRescheduleOpen(false)}>Cancel</Button>
+                        <Button
+                            onClick={handleRescheduleSubmit}
+                            disabled={
+                                isActionLoading ||
+                                !selectedRescheduleDate ||
+                                !selectedRescheduleTime
+                            }
+                        >
+                            {isActionLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Request Reschedule
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Cancel Confirmation Dialog */}
+            <Dialog open={isCancelOpen} onOpenChange={setIsCancelOpen}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <div className="flex items-center gap-2 text-red-600 mb-2">
+                            <AlertTriangle className="h-5 w-5" />
+                            <DialogTitle>Cancel Class?</DialogTitle>
+                        </div>
+                        <DialogDescription>
+                            Are you sure you want to cancel the session <strong>{selectedClass?.topic}</strong>?
+                            This action cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button variant="outline" onClick={() => setIsCancelOpen(false)}>Keep Class</Button>
+                        <Button
+                            variant="destructive"
+                            onClick={handleCancelSubmit}
+                            disabled={isActionLoading}
+                        >
+                            {isActionLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Yes, Cancel Class
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
